@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	// Pure-Go SQLite driver: allows static cross-compilation (CGO_ENABLED=0)
+	// for arm64/arm (e.g. Raspberry Pi) without a cross toolchain.
+	_ "modernc.org/sqlite"
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store/sqlstore"
@@ -25,9 +27,11 @@ func connectClient(ctx context.Context, logger *slog.Logger, dbPath, phone strin
 		return nil, fmt.Errorf("create database directory: %w", err)
 	}
 
-	// NOTE: the dialect string must match the registered sqlite driver name.
+	// NOTE: the dialect string must match the registered sqlite driver name
+	// ("sqlite" for modernc.org/sqlite; whatsmeow maps any "sqlite*" to its
+	// SQLite dialect).
 	dbLog := waLog.Stdout("Database", "warn", true)
-	container, err := sqlstore.New(ctx, "sqlite3", fmt.Sprintf("file:%s?_foreign_keys=on", dbPath), dbLog)
+	container, err := sqlstore.New(ctx, "sqlite", fmt.Sprintf("file:%s?_pragma=foreign_keys(1)&_pragma=busy_timeout(10000)", dbPath), dbLog)
 	if err != nil {
 		return nil, fmt.Errorf("open session database: %w", err)
 	}
