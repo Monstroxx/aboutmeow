@@ -47,7 +47,7 @@ func main() {
 	var (
 		bio         = flag.String("bio", "", "The bio text to keep alive. Required unless -version is given.")
 		emojiFlag   = flag.String("emoji", "", "Optional emoji shown next to the About text.")
-		durationOpt = flag.String("duration", "0", "About expiry in seconds as accepted by WhatsApp (e.g. 86400 = 1 day). 0 lets WhatsApp pick its default of ~30 days.")
+		durationOpt = flag.String("duration", "86400", "About expiry in seconds as accepted by WhatsApp (86400 = 1 day). The daemon renews daily anyway, so one day is the safe default. 0 = WhatsApp server default (~30 days), which some server versions reject with 400.")
 		dbFlag      = flag.String("db", defaultDBPath(), "Path to the SQLite session database.")
 		phoneFlag   = flag.String("phone", "", "Phone number in international format (e.g. 491234567890). Enables pairing by pair code instead of QR.")
 		daemonFlag  = flag.Bool("daemon", false, "Stay connected after the initial update and keep renewing the bio forever. Without this flag the app exits after the first renewal.")
@@ -128,18 +128,25 @@ func run(logger *slog.Logger, bio, emoji string, durationSec int64, dbPath, phon
 	// Push the initial bio immediately after the first successful (re)connect:
 	// connectClient blocks until the session is logged in and Connected was fired.
 	if err := setAboutWithRetry(ctx, client, logger, bio, emoji, durationSec); err != nil {
-		return err
+		if !daemon {
+			return err
+		}
+		// In daemon mode keep running: the hourly tick below will retry.
+		logger.Error("Initial About update failed, daemon keeps running and will retry", slog.Any("error", err))
+	} else {
+		logger.Info("About text is now visible again", slog.String("text", bio))
 	}
-	logger.Info("About text is now visible again", slog.String("text", bio))
 
 	if !daemon {
 		return nil
 	}
 
 	// Re-set the bio whenever WhatsApp drops and restores the connection,
-	// and independently on the daily renewal tick.
+	// and independently on the daily renewal tick. After failures the next
+	// attempt happens on the next hourly tick (retryAfter tracks this).
 	ticker := time.NewTicker(time.Hour)
 	defer ticker.Stop()
+	retryAfterFailure := false
 	nextRenewal := time.Now().Add(renewalInterval)
 
 	for {
@@ -152,17 +159,22 @@ func run(logger *slog.Logger, bio, emoji string, durationSec int64, dbPath, phon
 				logger.Debug("Not connected yet, skipping tick")
 				continue
 			}
-			if time.Now().Before(nextRenewal) {
+			retryNow := time.Now().After(nextRenewal) || retryAfterFailure
+			if !retryNow {
 				continue
 			}
 			if err := setAboutWithRetry(ctx, client, logger, bio, emoji, durationSec); err != nil {
 				logger.Error("Renewal failed, will retry next tick", slog.Any("error", err))
+				retryAfterFailure = true
 			} else {
+				retryAfterFailure = false
 				nextRenewal = time.Now().Add(renewalInterval)
 			}
 		case <-connectionRefresh:
 			if err := setAboutWithRetry(ctx, client, logger, bio, emoji, durationSec); err != nil {
 				logger.Error("Reconnect renewal failed", slog.Any("error", err))
+			} else {
+				nextRenewal = time.Now().Add(renewalInterval)
 			}
 		}
 	}
@@ -184,7 +196,7 @@ func setAboutWithRetry(ctx context.Context, client *whatsmeow.Client, logger *sl
 			case <-time.After(delay):
 			}
 		}
-		err := setAbout(ctx, client, bio, emoji, durationSec)
+		err := setAbout(ctx, client, logger, bio, emoji, durationSec)
 		if err == nil {
 			return nil
 		}
@@ -194,10 +206,26 @@ func setAboutWithRetry(ctx context.Context, client *whatsmeow.Client, logger *sl
 	return fmt.Errorf("updating About failed after %d attempts: %w", aboutMutationMaxRetries, lastErr)
 }
 
-func setAbout(ctx context.Context, client *whatsmeow.Client, bio, emoji string, durationSec int64) error {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	return client.SetStatusMessage(ctx, makeAboutInput(bio, emoji, durationSec))
+func setAbout(ctx context.Context, client *whatsmeow.Client, logger *slog.Logger, bio, emoji string, durationSec int64) error {
+	attempts := []int64{durationSec}
+	if durationSec == 0 {
+		// Some server versions reject duration=0 with "graphql error: 400".
+		// WhatsApp Web itself defaults to one day, so fall back to that and
+		// the full 30 days.
+		attempts = append(attempts, 86400, 2592000)
+	}
+	var lastErr error
+	for _, dur := range attempts {
+		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		err := client.SetStatusMessage(ctx, makeAboutInput(bio, emoji, dur))
+		cancel()
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		logger.Warn("About update rejected", slog.Int64("duration_sec", dur), slog.Any("error", err))
+	}
+	return lastErr
 }
 
 func makeAboutInput(bio, emoji string, durationSec int64) types.SetStatusInput {
