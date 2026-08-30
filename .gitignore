@@ -1,0 +1,8 @@
+# Binary
+aboutmeow
+
+# Test databases
+*.db
+*.db-journal
+*.db-shm
+*.db-wal

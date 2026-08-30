@@ -1,0 +1,22 @@
+[Unit]
+Description=WhatsApp Bio Keeper (keeps the About text alive)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Change the bio text here. The session db lives in /var/lib/aboutmeow.
+ExecStart=/usr/local/bin/aboutmeow -bio "YOUR PERMANENT BIO" -daemon -db /var/lib/aboutmeow/session.db
+Restart=always
+RestartSec=30
+
+# Hardening
+DynamicUser=yes
+StateDirectory=aboutmeow
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
