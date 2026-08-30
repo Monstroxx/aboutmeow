@@ -15,6 +15,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -45,7 +46,8 @@ func defaultDBPath() string {
 
 func main() {
 	var (
-		bio         = flag.String("bio", "", "The bio text to keep alive. Required unless -version is given.")
+		bio         = flag.String("bio", "", "The bio text to keep alive. Required unless -bio-file is given.")
+		bioFileFlag = flag.String("bio-file", "", "Path to a text file containing the bio. Recommended for systemd units and for multi-line bios with emojis.")
 		emojiFlag   = flag.String("emoji", "", "Optional emoji shown next to the About text.")
 		durationOpt = flag.String("duration", "86400", "About expiry in seconds as accepted by WhatsApp (86400 = 1 day). The daemon renews daily anyway, so one day is the safe default. 0 = WhatsApp server default (~30 days), which some server versions reject with 400.")
 		dbFlag      = flag.String("db", defaultDBPath(), "Path to the SQLite session database.")
@@ -83,8 +85,18 @@ Examples:
 
 	logger := newLogger(*logLevel)
 
-	if *bio == "" {
-		fmt.Fprintln(os.Stderr, "Error: -bio is required (the text that should stay visible).")
+	bioText := *bio
+	if *bioFileFlag != "" {
+		raw, err := os.ReadFile(*bioFileFlag)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: cannot read -bio-file %q: %v\n", *bioFileFlag, err)
+			os.Exit(2)
+		}
+		bioText = strings.TrimRight(string(raw), "\n\r")
+	}
+
+	if bioText == "" {
+		fmt.Fprintln(os.Stderr, "Error: a bio is required. Pass the text with -bio \"...\" or point -bio-file at a UTF-8 text file.")
 		flag.Usage()
 		os.Exit(2)
 	}
@@ -95,7 +107,7 @@ Examples:
 		os.Exit(2)
 	}
 
-	if err := run(logger, *bio, *emojiFlag, duration, *dbFlag, *phoneFlag, *daemonFlag); err != nil {
+	if err := run(logger, bioText, *emojiFlag, duration, *dbFlag, *phoneFlag, *daemonFlag); err != nil {
 		logger.Error("Fatal error", slog.Any("error", err))
 		os.Exit(1)
 	}

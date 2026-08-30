@@ -47,7 +47,7 @@ Requires Go 1.26+.
 
 - `-bio` (required): the text to keep alive.
 - `-daemon`: keep running and renew daily (otherwise exit after the first update).
-- `-emoji`: optional emoji shown next to the About text.
+- `-bio-file`: path to a UTF-8 text file containing the bio (recommended for systemd and multi-line/emoji bios).
 - `-duration`: expiry in seconds (e.g. `86400` = 1 day). Default `0` = WhatsApp's server default (~30 days).
 - `-phone`: international format phone number for code-based pairing.
 - `-db`: path to the SQLite session store (default `~/.local/share/aboutmeow/session.db`).

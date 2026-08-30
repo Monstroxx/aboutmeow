@@ -5,18 +5,22 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-# Change the bio text here. The session db lives in /var/lib/aboutmeow.
-ExecStart=/usr/local/bin/aboutmeow -bio "YOUR PERMANENT BIO" -daemon -db /var/lib/aboutmeow/session.db
+# The bio text lives in /etc/aboutmeow/bio.txt (edit it there, then restart the
+# service with: sudo systemctl restart aboutmeow)
+ExecStart=/usr/local/bin/aboutmeow -bio-file /etc/aboutmeow/bio.txt -daemon -db /var/lib/aboutmeow/session.db
 Restart=always
 RestartSec=30
 
-# Hardening
-DynamicUser=yes
+# Hardening: the service user needs read access to /etc/aboutmeow/bio.txt.
+# Bio file default permissions 0644 is fine (it is your public profile text).
 StateDirectory=aboutmeow
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
+# Allow reading the bio file from /etc (ProtectedSystem makes /etc read-only,
+# which is exactly what we want: the service can read, not write it).
+ReadOnlyPaths=/
 
 [Install]
 WantedBy=multi-user.target
